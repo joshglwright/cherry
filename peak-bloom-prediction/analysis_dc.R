@@ -3,18 +3,25 @@ library(forecast)
 library(DescTools)
 library(randtests)
 library(here)
+library(zoo)
+
 i_am("peak-bloom-prediction/analysis_dc.R")
 dc <- read_csv(here("peak-bloom-prediction/data/washingtondc.csv"))
 
 
 dc_ts<-ts(data = dc$bloom_doy, start = 1921)
+ma <- rollmean(dc$bloom_doy,9)
+ma <- c(NA,NA,NA,NA,ma,NA,NA,NA,NA)
 plot.ts(dc_ts)
+lines(seq(1921,2021),ma,col="blue")
+
 Box.test(dc_ts, type = "Ljung-Box")
 RunsTest(dc$bloom_doy)
 BartelsRankTest(dc$bloom_doy)
 
 dc_cur<-dc %>%
   filter(year >= 1980)
+
 dccur_ts<-ts(data = dc_cur$bloom_doy, start = 1980)
 plot.ts(dccur_ts)
 
