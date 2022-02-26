@@ -36,7 +36,7 @@ cel <- function(x) {
 }
 
 # Calculate GDD (Growing Degree-Days)
-thresh <- cel(45)
+thresh <- cel(40)
 dc_GDD <- dc_temp %>%
   mutate(Temp_DD = ifelse(Temp_Avg-thresh>0,Temp_Avg-thresh,0)) %>%
   group_by(Year) %>%
@@ -55,16 +55,15 @@ dc_GDD2 <- dc_GDD %>%
 dc_data<-left_join(dc_cur,dc_GDD2,by = 'Date') %>% select(-c(lat,long,alt,Year,Month,NewYear,NewCalendar))
 
 # Time series analysis
-avgts<-ts(dc_temp$Temp_Avg,frequency = 365,start=c(1980,1),end=c(2020,365))
-
-ts.plot(avgts)
-plot(decompose(avgts))
-
-auto.arima(avgts)
+# avgts<-ts(dc_temp$Temp_Avg,frequency = 365,start=c(1980,1),end=c(2020,365))
+# 
+# ts.plot(avgts)
+# plot(decompose(avgts))
+# 
+# auto.arima(avgts)
 
 # Adding in the Green Bud Phenological Stages
-
-year<-c(2021:2004)
+year <- c(2021:2004)
 green_buds<-c(70,59,64,56,55,68,77,75,70,60,59,73,62,50,64,59,66,64)
 gbuds<-as.data.frame(cbind(year,green_buds))
 gbuds2<-gbuds %>%
@@ -72,17 +71,12 @@ gbuds2<-gbuds %>%
 
 dc_gb<-left_join(gbuds2,dc_GDD,by = 'gb_doy') 
 
-dc_gb %>%
-  ggplot(aes(x=green_buds,y=bloom_doy)) +
-  geom_point()
-
-boxplot(dc_gb$bloom_doy-dc_gb$green_buds)
-
 # Simulation for Best GDD Threshold
 
 # Calculate GDD (Growing Degree-Days)
-thresh_vars<-c()
-thresh <- cel(seq(0,100,by = 0.05))
+thresh <- cel(seq(0,50,by = 0.05))
+thresh_vars <- vector(length=length(thresh))
+
 for (i in 1:length(thresh)) {
 dc_GDD3 <- dc_temp %>%
   mutate(Temp_DD = ifelse(Temp_Avg-thresh[i]>0,Temp_Avg-thresh[i],0)) %>%
@@ -94,4 +88,32 @@ dc_gb3<-left_join(gbuds2,dc_GDD3,by = 'gb_doy')
 thresh_vars[i]<-var(dc_gb3$GDD, na.rm = TRUE)
 }
 
-plot(thresh_vars)
+feh <- function(x) {
+  (9/5)*x+32
+}
+
+plot(feh(thresh),thresh_vars,type="l")
+
+# Test previous year's bloom doy as predictor
+tmp <- as_tibble(sort(dc_test$bloom_doy)[4:length(dc_test$bloom_doy)])
+
+dc_test <- dc_cur %>%
+  select(Date,bloom_doy) %>%
+  mutate(lag_bloom = lag(bloom_doy),err_lag=abs(bloom_doy - lag_bloom),err_mean=abs(bloom_doy-mean(tmp$value)))
+
+plot(dc_test$Date,dc_test$dif,type="l")
+plot(dc_test$Date,dc_test$bloom_doy)
+abline(a=mean(dc_test$bloom_doy),b=0,col="red")
+abline(a=median(dc_test$bloom_doy),b=0,col="blue")
+hist(dc_test$bloom_doy)
+
+thresh <- cel(40)
+dc_nlin <- dc_temp %>% 
+  mutate(Temp_DD = ifelse(Temp_Avg-thresh>0,Temp_Avg-thresh,0)) %>%
+  group_by(Year) %>%
+  mutate(GDD = cumsum(Temp_DD))
+
+
+nlin <- nls(8 ~ k/(1+(k-2)/2*exp(-r*GDD)),data=dc_data,start=list(k=1,r=0.0236),trace=T)
+
+ggplot(data=tmp,mapping=aes(x=value)) + geom_histogram(binwidth=3,col="blue")
