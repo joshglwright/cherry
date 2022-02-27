@@ -325,6 +325,28 @@ forecasts_ca
 # Original code from demo analysis
 # https://competition.statistics.gmu.edu/wp-content/uploads/2022/02/demo_analysis.html
 
-li_noaa <- getTemperature("GME00127786","2020-01-01","2022-01-31") %>%
-  select(-id)
+temps_li <- temps %>% filter(city == 'Liestal') %>%
+  mutate(doy = yday(date)) %>%
+  filter(doy != 366)
+
+# Create time series
+ts_li <- ts(temps_li$tavg, frequency = 365, start=c(2017,1), end=c(2022,31)) 
+plot(decompose(ts_li))
+
+if (file.exists('pred_li.rds')){
+  pred_li <- readRDS(here("pred_li.rds"))
+} else{
+  # Fit time series to GDD
+  ts_fit <- auto.arima(ts_li, ic = 'aicc')
+  ar <- ts_fit$arma[1:2]
+  ma <- ts_fit$arma[3:4]
+  dd <- ts_fit$arma[5:7]
+  
+  # Use result from fitted time series to predict temp until May 2031
+  preddays <- difftime("2031-05-31","2022-02-01",units="days")
+  pred_li <- sarima.for(ts_li,as.numeric(preddays),ar[1],dd[2],ar[2],ma[1],dd[3],ma[2],dd[1])
+  saveRDS(pred_li,here("pred_li.rds"))
+}
+
+
 ```  
