@@ -74,3 +74,21 @@ for(i in 1:length(temp_list)){
 # ts_fit <- sarima(avgts_dc, 3,0,2,0,1,0,365)
 # 
 # Temp_Pred <- sarima.for(avgts_dc,4015, 3,0,2,0,1,0,365)
+
+ts_fit <- sarima(avgts_dc, 3,0,2,0,1,0,365)
+
+Temp_Pred <- sarima.for(avgts_dc,4015, 3,0,2,0,1,0,365)
+
+# Getting GDD by Year starting on the 50th day of the year
+Year<-c()
+for (i in 2021:2031) {
+  Year<-append(Year,rep(i,365))
+}
+Temp_Pred2<- as.data.frame(cbind(Year,rep(1:365,11),Temp_Pred$pred))
+colnames(Temp_Pred2)<-c('Year','DOY','Temp')
+Temp_Pred3 <- Temp_Pred2 %>%
+  mutate(Date = as.Date(Num, origin))
+mutate(Temp_DD = ifelse(Temp-(40-32)5/9>0,Temp-(40-32)5/9,0)) %>%
+  mutate(NewCalendar = Date %m-% period("49 day"), NewYear=year(NewCalendar), NewDOY=yday(NewCalendar)) %>%
+  group_by(NeyYear) %>%
+  mutate(GDD = cumsum(Temp_DD),doy = yday(Date))
