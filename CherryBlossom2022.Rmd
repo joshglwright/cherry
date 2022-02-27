@@ -172,11 +172,21 @@ ggplot(plt_data,aes(x=Actual)) + geom_point(aes(y=doy)) +
 For us to predict future peak bloom dates for DC, we must first predict future GDDs. We could predict future temperature and calculate GDD from that; however, that would be unnecessary because we always shift the dates by 49 days and use the base of 4 degrees Celsius to calculate GDD. We can directly predict GDD to avoid that step.
 ```{r}
 # Create time series
-ts_gdd <- ts(GDD_final$GDD,frequency = 365,start=c(1980,1),end=c(2020,365))
+ts_gdd <- ts(GDD_final$GDD[50:nrow(GDD_final)],frequency = 365,
+             #Only start counting GDD from day 50 & 2021 DC data only goes to November
+             start=c(1980,50),end=c(2021,334)) 
 plot(decompose(ts_gdd))
 
-ts_fit <- auto.arima(ts_gdd, ic = 'aicc', max.P = 3, max.Q = 3)
+# Fit time series to GDD
+ts_fit <- auto.arima(ts_gdd, ic = 'aicc')
+ar <- ts_fit$arma[1:2]
+ma <- ts_fit$arma[3:4]
+dd <- ts_fit$arma[5:7]
 
+# Use result from fitted time series to predict GDD until May 2031
+preddays <- difftime("2031-05-31","2021-12-01",units="days")
+pred_dc <- sarima.for(ts_gdd,as.numeric(preddays),ar[1],dd[2],ar[2],ma[1],dd[3],ma[2],dd[1])
+saveRDS(pred_dc,here("pred_dc.rds"))
 ```
 
 
