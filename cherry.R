@@ -170,4 +170,3 @@ dc_test3 <- dc_test2 %>%
   mutate(err_GDD186=abs(bloom_doy-GDD186))
 
 summary(dc_test3)
-
