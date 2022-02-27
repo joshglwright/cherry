@@ -31,7 +31,6 @@ for(i in 1:length(temp_list)){
 
 
 
-
 # 
 # tmin_dc <- read_csv(here('peak-bloom-prediction','data','statistics_tmin.csv'))
 # tmax_dc <- read_csv(here('peak-bloom-prediction','data','statistics_tmax.csv'))
@@ -87,8 +86,9 @@ for (i in 2021:2031) {
 Temp_Pred2<- as.data.frame(cbind(Year,rep(1:365,11),Temp_Pred$pred))
 colnames(Temp_Pred2)<-c('Year','DOY','Temp')
 Temp_Pred3 <- Temp_Pred2 %>%
-  mutate(Date = as.Date(Num, origin))
-mutate(Temp_DD = ifelse(Temp-(40-32)5/9>0,Temp-(40-32)5/9,0)) %>%
+  mutate(Date = as.Date(Num, origin)) %>%
+  mutate(Temp_DD = ifelse(Temp-(40-32)*5/9>0,Temp-(40-32)*5/9,0)) %>%
   mutate(NewCalendar = Date %m-% period("49 day"), NewYear=year(NewCalendar), NewDOY=yday(NewCalendar)) %>%
   group_by(NeyYear) %>%
   mutate(GDD = cumsum(Temp_DD),doy = yday(Date))
+
