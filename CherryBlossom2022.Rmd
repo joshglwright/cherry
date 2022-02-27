@@ -4,17 +4,17 @@ author: "Joshua Write and Taehoon Song"
 date: "2/26/2022"
 output: pdf_document
 urlcolor: blue
+geometry: margin=0.5in
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE,message=FALSE)
-pred_dc <- readRDS('pred_dc.rds')
+knitr::opts_chunk$set(echo = TRUE,message=FALSE,fig.align = "center")
 ```
 
 # Introduction
 In this document, we demonstrate how we went about predicting the peak bloom dates in the coming decade for all four locations required by the competition. We use different modeling approaches due to different available data. 
 
-```{r, message=FALSE}
+```{r}
 # Loading in packages and data
 library(tidyverse)
 library(forecast)
@@ -39,7 +39,7 @@ where \textit{y} is the phenological stage and \textit{k} and \textit{r} are emp
 
 ## Obtaining temperature and phenological data for DC
 Since the species in the paper is different from what we're interested in, we must first identify the typical day of year when the cherry blossom trees in DC reach the green buds stage (Stage 3, as defined by the authors). 
-```{r message=FALSE}
+```{r}
 # Import historical weather data from DayMet
 dc_tmin <- read_csv(here('peak-bloom-prediction','data','statistics_tmin.csv'))
 dc_tmax <- read_csv(here('peak-bloom-prediction','data','statistics_tmax.csv'))
@@ -88,7 +88,7 @@ This result suggests that Stage 3 occurs as early as 50 days from the start of t
 ## Building the growth model
 As mentioned above, we calculate the GDD using a base of 4 degrees Celsius and starting from 49 days from the beginning of the year. Then, we fit the known phenological stages for the cherry blossoms in DC to the calculated GDDs. 
 
-```{r message=FALSE}
+```{r}
 thresh <- 4
 GDD_final <- dc_temp %>%
   mutate(NewYear=year(date %m-% period("49 day"))) %>%
@@ -118,7 +118,7 @@ The model results show that both \textit{k} and \textit{r} are significant. Howe
 ## Checking performance on historical data
 Now that we have the growth model, we can test its prediction performance out on historical data that we did not use. 
 
-```{r, message=FALSE}
+```{r}
 testdata <- GDD_final %>% filter(year<=2003) %>% #Used data from 2004 onward
   group_by(year) %>%
   filter(doy>=50 & doy <= 200) %>%
@@ -168,7 +168,7 @@ ggplot(plt_data,aes(x=Actual)) + geom_point(aes(y=doy)) +
   theme(plot.title=element_text(hjust=0.5))
 ```
 
-## Predicting future GDD
+## Predicting future GDD and future peak bloom dates
 For us to predict future peak bloom dates for DC, we must first predict future GDDs. We could predict future temperature and calculate GDD from that; however, that would be unnecessary because we always shift the dates by 49 days and use the base of 4 degrees Celsius to calculate GDD. We can directly predict GDD to avoid that step.
 ```{r, cache=TRUE}
 # Create time series
@@ -193,12 +193,31 @@ if (file.exists('pred_dc.rds')){
 }
 ```
 
+We can now predict the peak bloom day for DC using the predicted GDD as an input for the growth model. 
+
+```{r}
+# Forecasted GDD and growth stage
+newdata <- tibble(date=seq.Date(as.Date("2021-12-01"),length.out=length(pred_dc$pred),by="day"),
+                    GDD=pred_dc$pred,doy=yday(date),year=year(date))
+future_growthstage <- predict(growth_model,newdata=newdata)
+forecasts_dc <- newdata %>% mutate(pred.gs=future_growthstage) %>%
+  group_by(year) %>%
+  filter(doy >= 50 & doy <= 200) %>%
+  filter(round(pred.gs) >= 8) %>%
+  filter(row_number()==1) %>%
+  select(year,doy)
+
+forecasts_dc
+```
+
+# Predicting peak bloom dates for Vancouver
+Vancouver doesn't provide historical peak bloom dates. However, we can use the growth model from DC to predict future peak bloom dates because the tree species are identical (or close to identical) and the peak bloom definition is the same. We simply need to calculate historical GDD using the same definitions and predict future GDD for Vancouver to be able to predict the peak bloom dates.
+
+## Obtaining historical weather data
 
 
-# Obtaining historical weather data
-Using the function shown in the Appendix of the Demo Analysis for the competition, we obtain historical weather data for the four locations.
 
-```{r, message=FALSE}
+```{r}
 # library(rnoaa)
 # 
 # locs <- c("USC00186350","GME00127786","JA000047759","CA001108395")
