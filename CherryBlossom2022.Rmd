@@ -218,42 +218,113 @@ Vancouver doesn't provide historical peak bloom dates. However, we can use the g
 
 
 ```{r}
-# library(rnoaa)
-# 
-# locs <- c("USC00186350","GME00127786","JA000047759","CA001108395")
-# city <- c("DC","Liestal","Kyoto","Vancouver")
-# 
-# # Original code from demo analysis
-# # https://competition.statistics.gmu.edu/wp-content/uploads/2022/02/demo_analysis.html
-# get_temperature <- function (stationid) {
-#   tbls <- ghcnd_search(stationid = stationid, var = c("tmax","tmin"), 
-#                date_min = "2017-01-01", date_max = "2022-01-31")
-#   tmax <- tbls[[1]] %>% select(id,tmax,date)
-#   tmin <- tbls[[2]] %>% select(tmin,date)
-#   temp <- inner_join(tmax,tmin,by="date") %>%
-#     group_by(date) %>%
-#     # Calculate average and convert unit from 0.1 Celsius to 1 Celsius
-#     summarize(id,tavg=sum(tmax,tmin,na.rm=TRUE)/20) %>%
-#     ungroup() %>%
-#     mutate(year = year(date))
-#   return(temp)
-# }
-# 
-# # Obtain historical data
-# temp_list <- lapply(locs,get_temperature)
-# 
-# # ghcnd_search returns a list. Extract and append each element to create one dataset.
-# temps <- tibble()
-# for(i in 1:length(temp_list)){
-#   temps <- bind_rows(temps,temp_list[[i]])
-# }
-# 
-# # Add labels to station IDs
-# loclabels <- as_tibble(cbind(locs,city))
-# temps <- temps %>% left_join(loclabels,by=c("id"="locs")) %>% select(-id)
+library(rnoaa)
+
+locs <- c("USC00186350","GME00127786","JA000047759","CA001108395")
+city <- c("DC","Liestal","Kyoto","Vancouver")
+
+# Original code from demo analysis
+# https://competition.statistics.gmu.edu/wp-content/uploads/2022/02/demo_analysis.html
+get_temperature <- function (stationid) {
+  tbls <- ghcnd_search(stationid = stationid, var = c("tmax","tmin"),
+               date_min = "2017-01-01", date_max = "2022-01-31")
+  tmax <- tbls[[1]] %>% select(id,tmax,date)
+  tmin <- tbls[[2]] %>% select(tmin,date)
+  temp <- inner_join(tmax,tmin,by="date") %>%
+    group_by(date) %>%
+    # Calculate average and convert unit from 0.1 Celsius to 1 Celsius
+    summarize(id,tavg=sum(tmax,tmin,na.rm=TRUE)/20) %>%
+    ungroup() %>%
+    mutate(year = year(date))
+  return(temp)
+}
+
+# Obtain historical data
+temp_list <- lapply(locs,get_temperature)
+
+# ghcnd_search returns a list. Extract and append each element to create one dataset.
+temps <- tibble()
+for(i in 1:length(temp_list)){
+  temps <- bind_rows(temps,temp_list[[i]])
+}
+
+# Add labels to station IDs
+loclabels <- as_tibble(cbind(locs,city))
+temps <- temps %>% left_join(loclabels,by=c("id"="locs")) %>% select(-id)
 ```
 
 The resulting temperature data looks like the following:
 ```{r, echo=FALSE}
-# temps %>% group_by(city) %>% slice_tail(n=3)
+temps %>% group_by(city) %>% slice_tail(n=3)
 ```
+
+```{r,cache=TRUE}
+# Import historical weather data from DayMet
+ca_tmin <- read_csv(here('peak-bloom-prediction','data','statistics_tmin_ca.csv'))
+ca_tmax <- read_csv(here('peak-bloom-prediction','data','statistics_tmax_ca.csv'))
+
+# DayMet data stops at 2019. Use rnoaa for 2020 and 2021.
+# Original code from demo analysis
+# https://competition.statistics.gmu.edu/wp-content/uploads/2022/02/demo_analysis.html
+
+ca_noaa <- getTemperature("CA001108395","2020-01-01","2022-01-31") %>%
+  select(-id)
+
+# Temperature data
+ca_temp <- left_join(ca_tmin,ca_tmax, by = 'dt') %>% 
+  select(dt,value_mean.x,value_mean.y) %>%
+  rename(tmin=value_mean.x,tmax=value_mean.y) %>%
+  summarize(date=dt,tavg=0.5*(tmin+tmax), year=year(date)) %>%
+  bind_rows(ca_noaa)
+
+# GDD calculations
+thresh <- 4
+GDD_final <- ca_temp %>%
+  mutate(NewYear=year(date %m-% period("49 day"))) %>%
+  mutate(DD = ifelse(tavg - thresh > 0, tavg - thresh, 0)) %>%
+  group_by(NewYear) %>%
+  mutate(GDD = cumsum(DD),doy = yday(date)) %>%
+  ungroup()
+
+# Create time series
+ts_gdd <- ts(GDD_final$GDD[50:nrow(GDD_final)],frequency = 365,
+             #Only start counting GDD from day 50 & 2022 ca data only goes to January
+             start=c(1980,50),end=c(2022,31)) 
+plot(decompose(ts_gdd))
+
+if (file.exists('pred_ca.rds')){
+  pred_ca <- readRDS(here("pred_ca.rds"))
+} else{
+  # Fit time series to GDD
+  ts_fit <- auto.arima(ts_gdd, ic = 'aicc')
+  ar <- ts_fit$arma[1:2]
+  ma <- ts_fit$arma[3:4]
+  dd <- ts_fit$arma[5:7]
+  
+  # Use result from fitted time series to predict GDD until May 2031
+  preddays <- difftime("2031-05-31","2022-02-01",units="days")
+  pred_ca <- sarima.for(ts_gdd,as.numeric(preddays),ar[1],dd[2],ar[2],ma[1],dd[3],ma[2],dd[1])
+  saveRDS(pred_ca,here("pred_ca.rds"))
+}
+
+# Forecasted GDD and growth stage
+newdata <- tibble(date=seq.Date(as.Date("2022-02-01"),length.out=length(pred_ca$pred),by="day"),
+                    GDD=pred_ca$pred,doy=yday(date),year=year(date))
+future_growthstage <- predict(growth_model,newdata=newdata)
+forecasts_ca <- newdata %>% mutate(pred.gs=future_growthstage) %>%
+  group_by(year) %>%
+  filter(doy >= 50 & doy <= 200) %>%
+  filter(round(pred.gs) >= 8) %>%
+  filter(row_number()==1) %>%
+  select(year,doy)
+
+forecasts_ca
+```
+
+```{r}
+# Original code from demo analysis
+# https://competition.statistics.gmu.edu/wp-content/uploads/2022/02/demo_analysis.html
+
+li_noaa <- getTemperature("GME00127786","2020-01-01","2022-01-31") %>%
+  select(-id)
+```  
