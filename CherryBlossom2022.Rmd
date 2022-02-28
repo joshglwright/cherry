@@ -22,7 +22,6 @@ library(lubridate)
 library(astsa)
 library(here)
 library(rnoaa)
-library(gridExtra)
 
 cherry <- read_csv(here('peak-bloom-prediction','data','washingtondc.csv')) %>%
   bind_rows(read_csv(here('peak-bloom-prediction','data','liestal.csv'))) %>%
@@ -286,10 +285,10 @@ locs <- c("GME00127786","JA000047759")
 city <- c("Liestal","Kyoto")
 
 # Obtain historical data
-temp_list <- lapply(locs,getTemperature,date_min = "1980-01-01", date_max = "2022-01-31")
+temp_list <- lapply(locs,getTemperature,date_min = '1980-01-01', date_max = '2021-12-31')
 
-# Data for Liestal (missing 2015 and half of 2016. Take them out)
-# Data for Kyoto (missing Sep 2001. Take out 2001.)
+# Data for Liestal (missing 2015 and half of 2016)
+# Data for Kyoto (missing Sep 2001)
 
 # ghcnd_search returns a list. Extract and append each element to create one dataset.
 temps <- tibble()
@@ -301,7 +300,7 @@ for(i in 1:length(temp_list)){
 loclabels <- as_tibble(cbind(locs,city))
 temps <- temps %>% left_join(loclabels,by=c("id"="locs")) %>% select(-id)
 
-alldates <- tibble(date=seq.Date(from=as.Date('1980-01-01'),to=as.Date('2022-01-31'),by='day'))
+alldates <- tibble(date=seq.Date(from=as.Date('1980-01-01'),to=as.Date('2021-12-31'),by='day'))
 
 li_temp <- alldates %>% left_join(temps %>% filter(city == 'Liestal'), by='date') %>%
   mutate(year=year(date), doy = yday(date)) %>%
@@ -326,14 +325,14 @@ testdata <- cherry %>%
 mean(predict(growth_model,newdata=testdata),na.rm=TRUE)
 ```
 
-We can approximate the peak bloom for the cherry trees in Liestal (as defined by MeteoSwiss) using the growth model for the trees in DC if we use 7.4 as a threshold for the predicted growth stage. In order words, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage rounds to 7.4.
+We can approximate the peak bloom for the cherry trees in Liestal (as defined by MeteoSwiss) using the growth model for the trees in DC if we use 7.39 as a threshold for the predicted growth stage. In order words, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage is greater than or equal to 7.39.
 
 ```{r, cache=TRUE, echo=FALSE}
 # Create time series
-ts_gdd <- ts(GDD_final$tavg[50:nrow(GDD_final)],frequency = 365,
-             #Only start counting GDD from day 50 & 2022 li data only goes to January
-             start=c(1980,50),end=c(2022,31)) 
-ts_gdd %>%
+ts_temp <- ts(GDD_final$tavg[50:nrow(GDD_final)],frequency = 365,
+             #Only start counting from day 50
+             start=c(1980,50),end=c(2021,365)) 
+ts_temp %>%
   mstl(s.window="periodic") %>%
   autoplot()
 
@@ -342,20 +341,20 @@ if (file.exists('pred_li.rds')){
 } else{
   # Fit time series to GDD
   # Fix seasonal component to (0,1,0)
-  ts_fit <- auto.arima(ts_gdd, ic = 'aicc',D=1,start.P=0,start.Q=0,max.Q=0,max.P=0)
+  ts_fit <- auto.arima(ts_gdd, ic = 'aicc')
   ar <- ts_fit$arma[1:2]
   ma <- ts_fit$arma[3:4]
   dd <- ts_fit$arma[5:7]
   
   # Use result from fitted time series to predict GDD until May 2031
-  preddays <- difftime("2031-05-31","2022-02-01",units="days")
-  pred_li <- sarima.for(ts_gdd,as.numeric(preddays),ar[1],dd[2],ar[2],ma[1],dd[3],ma[2],dd[1])
+  preddays <- difftime("2031-05-31","2022-01-01",units="days")
+  pred_li <- sarima.for(ts_temp,as.numeric(preddays),ar[1],dd[2],ar[2],ma[1],dd[3],ma[2],dd[1])
   saveRDS(pred_li,here("pred_li.rds"))
 }
 
 # Forecasted GDD and growth stage
-newdata <- tibble(date=seq.Date(as.Date("2022-02-01"),length.out=length(pred_li$pred),by="day"),
-                  doy=yday(date),year=year(date)) %>%
+newdata <- tibble(date=seq.Date(as.Date("2022-01-01"),length.out=length(pred_li$pred),by="day"),
+                  doy=yday(date),year=year(date),tavg=pred_li$pred) %>%
   mutate(NewYear=year(date %m-% period("49 day"))) %>%
   mutate(DD = ifelse(tavg - thresh > 0, tavg - thresh, 0)) %>%
   group_by(NewYear) %>%
@@ -367,7 +366,7 @@ future_growthstage <- predict(growth_model,newdata=newdata)
 forecasts_li <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   group_by(year) %>%
   filter(doy >= 50 & doy <= 200) %>%
-  filter(round(pred.gs,digits=1) >= 7.4) %>%
+  filter(pred.gs >= 7.39) %>%
   filter(row_number()==1) %>%
   select(year,doy)
 
@@ -382,8 +381,27 @@ jp_temp <- temps %>% filter(city == 'Kyoto') %>%
   mutate(doy = yday(date)) %>%
   filter(doy != 366) #Leap year mess
 
+# Historical temperature plot for Kyoto
+plot(jp_temp$date,jp_temp$tavg,type="l")
+```
+
+Notice that the data abruptly cuts off at 0 throughout the years. This is likely due to missing values. We substitute the monthly average temperature when there are 0s. Kyoto is a very warm city and rarely dips below 0 degrees Celsius, so we shouldn't lose too much information with this substitution. We're missing a month of data for September 2009, but that shouldn't be too much of a problem for predicting 2022 and onward.
+
+```{r}
+# Substitute 0s for monthly averages
+jp_temp2 <- jp_temp %>%
+  mutate(year=year(date), month=month(date)) %>%
+  group_by(year,month) %>%
+  mutate(monthavg=mean(tavg), tavg=ifelse(tavg==0,monthavg,tavg))
+
+plot(jp_temp2$date,jp_temp2$tavg,type="l")
+```
+
+With the substitution, the odd behavior is gone. We can proceed to calculate GDD for Kyoto.
+
+```{r}
 # GDD calculations
-GDD_final <- jp_temp %>%
+GDD_final <- jp_temp2 %>%
   mutate(NewYear=year(date %m-% period("49 day"))) %>%
   mutate(DD = ifelse(tavg - thresh > 0, tavg - thresh, 0)) %>%
   group_by(NewYear) %>%
@@ -399,15 +417,15 @@ testdata <- cherry %>%
 mean(predict(growth_model,newdata=testdata),na.rm=TRUE)
 ```
 
-Based on the above result, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage rounds to 8.
+Based on the above result, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage is greater than or equal to 8.02.
 
 ```{r, cache=TRUE, echo=FALSE}
 # Create time series
-ts_gdd <- ts(GDD_final$tavg[50:nrow(GDD_final)],frequency = 365,
-             #Only start counting GDD from day 50 & 2022 li data only goes to January
-             start=c(2017,50),end=c(2022,31)) 
+ts_temp <- ts(GDD_final$tavg[50:nrow(GDD_final)],frequency = 365,
+             #Only start counting from day 50
+             start=c(1980,50),end=c(2021,365))
 
-ts_gdd %>%
+ts_temp %>%
   mstl(s.window="periodic") %>%
   autoplot()
 
@@ -415,20 +433,20 @@ if (file.exists('pred_jp.rds')){
   pred_jp <- readRDS(here("pred_jp.rds"))
 } else{
   # Fit time series to GDD
-  ts_fit <- auto.arima(ts_gdd, ic = 'aicc',D=1,start.P=0,start.Q=0,max.Q=0,max.P=0)
+  ts_fit <- auto.arima(ts_gdd, ic = 'aicc')
   ar <- ts_fit$arma[1:2]
   ma <- ts_fit$arma[3:4]
   dd <- ts_fit$arma[5:7]
   
   # Use result from fitted time series to predict GDD until May 2031
-  preddays <- difftime("2031-05-31","2022-02-01",units="days")
-  pred_jp <- sarima.for(ts_gdd,as.numeric(preddays),ar[1],dd[2],ar[2],ma[1],dd[3],ma[2],dd[1])
+  preddays <- difftime("2031-05-31","2022-01-01",units="days")
+  pred_jp <- sarima.for(ts_temp,as.numeric(preddays),ar[1],dd[2],ar[2],ma[1],dd[3],ma[2],dd[1])
   saveRDS(pred_jp,here("pred_jp.rds"))
 }
 
 # Forecasted GDD and growth stage
-newdata <- tibble(date=seq.Date(as.Date("2022-02-01"),length.out=length(pred_jp$pred),by="day"),
-                  doy=yday(date),year=year(date)) %>%
+newdata <- tibble(date=seq.Date(as.Date("2022-01-01"),length.out=length(pred_jp$pred),by="day"),
+                  doy=yday(date),year=year(date),tavg=pred_jp$pred) %>%
   mutate(NewYear=year(date %m-% period("49 day"))) %>%
   mutate(DD = ifelse(tavg - thresh > 0, tavg - thresh, 0)) %>%
   group_by(NewYear) %>%
@@ -440,7 +458,7 @@ future_growthstage <- predict(growth_model,newdata=newdata)
 forecasts_jp <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   group_by(year) %>%
   filter(doy >= 50 & doy <= 200) %>%
-  filter(round(pred.gs,digits=1) >= 8) %>%
+  filter(pred.gs >= 8) %>%
   filter(row_number()==1) %>%
   select(year,doy)
 
@@ -454,5 +472,5 @@ The summary table below shows the final predictions for the four locations from 
 ```
 
 # Closing thoughts
-If historical phenological stages were recorded for all locations in this competition, we would have been able to fit a growth model for each species and location. This would have allowed us to create more accurate models. Additionally, weather data was extremely limited or unreliable for locations outside the United States. If historical weather data was free and readily available to the public, we would have been able to create a better time series model for GDD.
+If historical phenological stages were recorded for all locations in this competition, we would have been able to fit a growth model for each species and location. This would have allowed us to create more accurate models. Additionally, weather data was extremely limited or unreliable for locations outside the United States. If historical weather data was free and readily available to the public, we would have been able to create a better time series model for GDD. Lastly, using weather forecasts from meteorologists will likely improve the accuracy of the peak bloom predictions.
 
