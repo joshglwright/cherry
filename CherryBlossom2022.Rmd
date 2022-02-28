@@ -385,14 +385,14 @@ jp_temp <- temps %>% filter(city == 'Kyoto') %>%
 plot(jp_temp$date,jp_temp$tavg,type="l")
 ```
 
-Notice that the data abruptly cuts off at 0 throughout the years. This is likely due to missing values. We substitute the monthly average temperature when there are 0s. Kyoto is a very warm city and rarely dips below 0 degrees Celsius, so we shouldn't lose too much information with this substitution. We're missing a month of data for September 2009, but that shouldn't be too much of a problem for predicting 2022 and onward.
+Notice that the data abruptly cuts off at 0 throughout the years. This is likely due to missing values. We remove 0s to NAs so that the algorithm knows that the value is actually missing. Kyoto is a very warm city and rarely dips below 0 degrees Celsius, so we shouldn't lose too much information with this substitution. We're missing a month of data for September 2009, but that shouldn't be too much of a problem for predicting 2022 and onward.
 
 ```{r}
-# Substitute 0s for monthly averages
+# Substitute 0s for NA
 jp_temp2 <- jp_temp %>%
   mutate(year=year(date), month=month(date)) %>%
   group_by(year,month) %>%
-  mutate(monthavg=mean(tavg), tavg=ifelse(tavg==0,monthavg,tavg))
+  mutate(tavg=ifelse(tavg==0,NA,tavg))
 
 plot(jp_temp2$date,jp_temp2$tavg,type="l")
 ```
@@ -417,17 +417,52 @@ testdata <- cherry %>%
 mean(predict(growth_model,newdata=testdata),na.rm=TRUE)
 ```
 
-Based on the above result, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage is greater than or equal to 8.02.
+Based on the above result, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage is greater than or equal to 8.26.
 
-```{r, cache=TRUE, echo=FALSE}
+```{r}
 # Create time series
-ts_temp <- ts(GDD_final$tavg[50:nrow(GDD_final)],frequency = 365,
-             #Only start counting from day 50
-             start=c(1980,50),end=c(2021,365))
+ts_temp <- ts(GDD_final$tavg[1:nrow(GDD_final)],frequency = 365,
+             start=c(1980,1),end=c(2021,365))
 
 ts_temp %>%
   mstl(s.window="periodic") %>%
   autoplot()
+```
+
+<!-- There's something weird going on with the last few months of data for Kyoto. As shown in the plot above. When comparing the time period between August and January for 2020 versus 2021, we see that the plot for 2021 proceeds horizontally and abruptly drops compared to the 2020 plot, which shows are more gradual downward trend.  -->
+
+<!-- ```{r echo=FALSE,message=FALSE} -->
+<!-- jp_temp2 %>% filter(date >= "2021-08-01" & date <= "2021-12-31") %>%  -->
+<!--   ungroup() %>% select(date,tavg) %>% ggplot(aes(x=date)) + geom_line(aes(y=tavg)) + -->
+<!--   theme_minimal() + -->
+<!--   ggtitle("Temperature Plot for August through December (2021)") + -->
+<!--   xlab("Date") + -->
+<!--   ylab("Degree Celsius") + -->
+<!--   theme(plot.title=element_text(hjust=0.5)) -->
+
+<!-- jp_temp2 %>% filter(date >= "2020-08-01" & date <= "2020-12-31") %>%  -->
+<!--   ungroup() %>% select(date,tavg) %>% ggplot(aes(x=date)) + geom_line(aes(y=tavg)) + -->
+<!--   theme_minimal() + -->
+<!--   ggtitle("Temperature Plot for August through December (2020)") + -->
+<!--   xlab("Date") + -->
+<!--   ylab("Degree Celsius") + -->
+<!--   theme(plot.title=element_text(hjust=0.5)) -->
+
+<!-- ``` -->
+<!-- While not impossible, the historical weather available through [Weather Underground](https://www.wunderground.com/history/monthly/jp/itami-shi/RJOO) shows that the temperature drop was not so drastic. As this sudden drop will significantly affect predictions, we deemed the 2021 data for Kyoto unreliable and removed the records. -->
+
+<!-- ```{r} -->
+<!-- # Create time series -->
+<!-- ts_temp2 <- ts(GDD_final$tavg[50:(nrow(GDD_final)-365)],frequency = 365, -->
+<!--              #Only start counting from day 50 -->
+<!--              start=c(1980,50),end=c(2020,365)) -->
+
+<!-- ts_temp2 %>% -->
+<!--   mstl(s.window="periodic") %>% -->
+<!--   autoplot() -->
+<!-- ``` -->
+
+```{r, cache=TRUE, echo=FALSE}
 
 if (file.exists('pred_jp.rds')){
   pred_jp <- readRDS(here("pred_jp.rds"))
