@@ -1,7 +1,7 @@
 ---
 title: "Predicting Cherry Blossom Bloom Dates"
 author: "Joshua Wright and Taehoon Song"
-date: "2/26/2022"
+date: "2/28/2022"
 output: pdf_document
 urlcolor: blue
 geometry: margin=0.5in
@@ -35,18 +35,18 @@ cherry <- read_csv(here('peak-bloom-prediction','data','washingtondc.csv')) %>%
 
 # Washington DC
 
-In the field of phenology, plant growth is often modeled by using growing degree-day (GDD) as a predictor. Since the [National Park Service(NPS)](https://www.nps.gov/subjects/cherryblossom/bloom-watch.htm) publishes dates of various growth stages for 2004 through 2021, we use this to build a logistic growth model (also known as the Verhulst model) that helps us estimate the threshold GDD for which we can expect the stage for the flowers to bloom.  The authors use 4 degrees Celsius as the base for calculating GDD and fit a logistic function to the phenological stages from side green as a function of accumulated GDD.
+In the field of phenology, plant growth is often modeled by using growing degree-day (GDD) as a predictor. Since the [National Park Service (NPS)](https://www.nps.gov/subjects/cherryblossom/bloom-watch.htm) publishes dates of various growth stages for 2004 through 2021, we use this to build a logistic growth model (also known as the Verhulst model) that helps us estimate the threshold GDD for which we can expect the stage for the flowers to bloom.  The authors use 4 degrees Celsius as the base for calculating GDD and fit a logistic function to the phenological stages from side green as a function of accumulated GDD.
 
 \[
 y = \frac{k}{1+\left[\frac{k-n_0}{n_0}\cdot\exp(-r\cdot \text{GDD})\right]}
 \]
 
-where \textit{y} is the phenological stage and \textit{k} and \textit{r} are empirical factors related to growth rate and limited growth factors. \textit{y} is an integer value which ranges from 3 (green budding stage) and 8 (peak blossoming stage). Now we  use this model to fit the growth stages published by the NPS as a function of cumulative GDD. In our data from the NPS, we only have data starting at green budding (stage 3), as such our $n_0$ will be 3.
+where \textit{y} is the phenological stage and \textit{k} and \textit{r} are empirical factors related to growth rate and limited growth factors. This type of model has been shown to work for predicting phenological stages given GDD for sour cherry trees (see [Phenological Models of Flower Bud Stages and Fruit Growth of 'Montmorency' Sour Cherry Based on Growing Degree-day Accumulation by C. Zavalloni, J. Adresen, and J. Flore](https://journals.ashs.org/downloadpdf/journals/jashs/131/5/article-p601.pdf)). \textit{y} in our model is an integer value which ranges from 3 (green budding stage) and 8 (peak blossoming stage). Stages 4 through 7 are those defined in the NPS data, but are only used for fitting this model. We use this model to fit the growth stages published by the NPS as a function of cumulative GDD. In our data from the NPS, we only have data starting at green budding (stage 3), as such our $n_0$ will be 3.
 
 ## Obtaining temperature and phenological data for DC
-In order to determine at what day of year we start calculating GDD, we need to determine when our $n_0$ stage is estimated to begin. To do this, we will look at the range of dates that green budding is reported and take the minimum, which is found to be at 50 days into the year. Thus, we only use the average temperatures after the 49th day of the year to ensure that we start calculating GDD around when Stage 3 occurs.
+In order to determine at what day of year we start calculating GDD, we need to determine when our $n_0$ stage is estimated to begin. To do this, we will look at the range of dates that green budding is reported and take the minimum, which is found to be at 50 days into the year. Thus, we only use the average temperatures after the 49th day of the year to ensure that we start calculating GDD around when Stage 3 occurs (the reason we calculate the GDD at this point is because the logistic growth model assumes the GDD is zero at stage $n_0$).
 
-```{r, echo=FALSE}
+```{r, echo=FALSE, results='hide'}
 # Import historical weather data from DayMet
 dc_tmin <- read_csv(here('peak-bloom-prediction','data','statistics_tmin.csv'))
 dc_tmax <- read_csv(here('peak-bloom-prediction','data','statistics_tmax.csv'))
@@ -91,9 +91,9 @@ summary(phenostage$GreenBuds)
 ```
 
 ## Building the growth model
-As mentioned above, we calculate the GDD using a base of 4 degrees Celsius and starting from 49 days from the beginning of the year. Then, we fit the known phenological stages for the cherry blossoms in DC to the calculated GDDs. 
+As mentioned above, we calculate the GDD using a base of 4 degrees Celsius and starting from 49 days from the beginning of the year. Then, we fit the known phenological stages for the cherry blossoms in DC to the calculated GDDs. Fitting the model in *R*, we get the following output:
 
-```{r}
+```{r, echo=FALSE}
 thresh <- 4
 GDD_final <- dc_temp %>%
   mutate(NewYear=year(date %m-% period("49 day"))) %>%
@@ -156,7 +156,7 @@ kable(mae_tab)
 
 Our growth model has a much lower mean absolute error (MAE) compared to simply using the previous year's bloom date as a predictor. This is good because this is the bare minimum a useful model should be able to do. This is more apparent when we plot the two models against the actual peak bloom days since January 1st.
 
-```{r}
+```{r, echo=FALSE}
 plt_data <- comp %>% rename(Actual=act.doy,GrowthModel=pred.doy,LagModel=lag_bloom) %>%
   pivot_longer(cols=c("GrowthModel","LagModel"),names_to="type",values_to="doy") %>%
   filter(!is.na(err_lag))
@@ -169,7 +169,7 @@ ggplot(plt_data,aes(x=Actual)) + geom_point(aes(y=doy)) +
   geom_abline(slope=1,col="steelblue") +
   geom_text(aes(x=90,y=80,label="<- Perfect Prediction")) +
   theme_minimal() +
-  ggtitle("Actual vs Predicted Peak Bloom for DC") +
+  ggtitle("Actual vs Predicted Peak Bloom for DC (1980-2003)") +
   xlab("Actual peak bloom (days since Jan 1st)") +
   ylab("Predicted peak bloom (days since Jan 1st)") +
   xlim(c(70,105)) + ylim(c(70,105)) +
@@ -180,12 +180,12 @@ ggplot(plt_data,aes(x=Actual)) + geom_point(aes(y=doy)) +
 
 For us to predict future peak bloom dates for Washington D.C., we must first predict future GDDs. We could predict future temperature and calculate GDD from that; however, that would be unnecessary because we always start calculating GDD at 50 days and use the base of 4 degrees Celsius. We can directly predict GDD to avoid that step. For GDD prediction, we will fit a model to the GDD using a time series seasonal ARIMA model.
 
-```{r, cache=TRUE}
+```{r, cache=TRUE, echo=FALSE, results='hide'}
 # Create time series
 ts_gdd <- ts(GDD_final$GDD[50:nrow(GDD_final)],frequency = 365,
              #Only start counting GDD from day 50 & 2021 DC data only goes to November
              start=c(1980,50),end=c(2021,334)) 
-plot(decompose(ts_gdd))
+# plot(decompose(ts_gdd))
 
 if (file.exists('pred_dc.rds')){
   pred_dc <- readRDS(here("pred_dc.rds"))
@@ -205,7 +205,7 @@ if (file.exists('pred_dc.rds')){
 
 With a time series model fit, we can now predict the peak bloom day for DC using the predicted GDD as an input for the logistic growth model. Feeding our predicted GDD values into our model outputs the following predictions:
 
-```{r}
+```{r, echo=FALSE}
 # Forecasted GDD and growth stage
 newdata <- tibble(date=seq.Date(as.Date("2021-12-01"),length.out=length(pred_dc$pred),by="day"),
                     GDD=pred_dc$pred,doy=yday(date),year=year(date))
@@ -218,7 +218,7 @@ forecasts_dc <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   select(year,doy)
 
 colnames(forecasts_dc)<-c('Year', 'Day of Year')
-kable(forecasts_dc)
+kable(t(forecasts_dc))
 ```
 
 # Vancouver
@@ -257,7 +257,7 @@ GDD_final <- ca_temp %>%
 ts_gdd <- ts(GDD_final$GDD[50:nrow(GDD_final)],frequency = 365,
              #Only start counting GDD from day 50 & 2022 ca data only goes to January
              start=c(1980,50),end=c(2022,31)) 
-plot(decompose(ts_gdd))
+# plot(decompose(ts_gdd))
 
 if (file.exists('pred_ca.rds')){
   pred_ca <- readRDS(here("pred_ca.rds"))
@@ -286,14 +286,14 @@ forecasts_ca <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   select(year,doy)
 
 colnames(forecasts_ca)<-c('Year', 'Day of Year')
-kable(forecasts_ca)
+kable(t(forecasts_ca))
 ```
 
 What we have are later predictions later than what we saw in Washington D.C., but that is to be expected given the lower average temperatures in Vancouver.
 
 # Liestal
 
-The cherry tree species in Liestal is a different species from the ones in Washington D.C. and Vancouver. Additionally, the percentage of blooming for the tree to be declared as at the stage of peak bloom is less as well. Ideally, we would want to fit a new growth model using historical phenological stages. Unfortunately, such a dataset is not readily available. Thusly, we use the same growth model parameters \textit{k} and \textit{r} from original to calculate the mean growth stage for historical peak bloom dates. This is to say that we will use the cumulative GDD from each of the historical bloom dates to see what *y* value our model would predict at that GDD. We will once again start calculating GDD at the 50th day of the year. We use the average growth stage for the past 5 years as the cutoff for our prediction.
+The cherry tree species in Liestal is a different species from the ones in Washington D.C. and Vancouver. Additionally, the percentage of blooming for the tree to be declared as at the stage of peak bloom is less as well. Ideally, we would want to fit a new growth model using historical phenological stages. Unfortunately, such a dataset is not readily available. Thusly, we use the same growth model parameters \textit{k} and \textit{r} from original to calculate the mean growth stage for historical peak bloom dates. This is to say that we will use the cumulative GDD from each of the historical bloom dates to see what *y* value our model would predict at that GDD. We will once again start calculating GDD at the 50th day of the year. We use the average growth stage for the past 5 years as the cutoff for our prediction, which is found to be approximately 6.8.
 
 ```{r, cache=TRUE, echo=FALSE}
 # Obtain historical temps for both Liestal and Kyoto
@@ -332,7 +332,7 @@ GDD_final <- li_temp %>%
   ungroup()
 ```
 
-```{r}
+```{r, echo=FALSE, results='hide'}
 # Check historical GDD and corresponding predicted growth stages for actual bloom dates in Liestal
 testdata <- cherry %>% 
   left_join(GDD_final %>% select(date,GDD), by=c('bloom_date'='date')) %>%
@@ -389,7 +389,7 @@ forecasts_li <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   select(year,doy)
 
 colnames(forecasts_li)<-c('Year', 'Day of Year')
-kable(forecasts_li)
+kable(t(forecasts_li))
 ```  
 
 # Kyoto
@@ -407,7 +407,7 @@ plot(jp_temp$date,jp_temp$tavg,type="l", ylab = "Average Temperature (Celsius)",
 
 Notice that the data abruptly cuts off at 0 commonly starting at the year 1990. This is likely due to missing values due to these freezing temperatures being abruptly different than previous temperatures and sometimes even in the middle of summer. We change 0's to NA's so that the algorithm knows that the value is actually missing. Kyoto is a very warm city and rarely dips below 0 degrees Celsius, so we should not lose too much information with this substitution. We're missing a month of data for September 2009, but that shouldn't be too much of a problem for predicting 2022 and onward given the amount of data we have. Modifying the data as we mentioned, we have this new time series as seen below.
 
-```{r}
+```{r, echo=FALSE}
 # Substitute 0s for NA
 jp_temp2 <- jp_temp %>%
   mutate(year=year(date), month=month(date)) %>%
@@ -417,9 +417,9 @@ jp_temp2 <- jp_temp %>%
 plot(jp_temp2$date,jp_temp2$tavg,type="l", ylab = "Average Temperature (Celsius)", xlab = "Date", main = "Modified Time Series of Daily Average Temperature in Kyoto")
 ```
 
-With the substitution, the odd behavior is gone mostly accounted for, so we can proceed to calculate the historical GDD for Kyoto. Just like with Liestal, we will examine what stage the previous bloom dates in 2016 to 2021 were according to our model.
+With the substitution, the odd behavior is mostly accounted for, so we can proceed to calculate the historical GDD for Kyoto. Just like with Liestal, we will examine what stage the previous bloom dates in 2016 to 2021 were according to our model.
 
-```{r}
+```{r,echo=FALSE, results='hide'}
 # GDD calculations
 GDD_final <- jp_temp2 %>%
   mutate(NewYear=year(date %m-% period("49 day"))) %>%
@@ -440,7 +440,7 @@ jp_thresh <- mean(predict(growth_model,newdata=testdata),na.rm=TRUE)
 
 What we find is that we want our model to predict when the stage is 8.3. This makes sense with the peak bloom definition being greater than that of Washington D.C.. With this stage number, we fit a time series model to the daily average temperature of Kyoto to predict future GDD and thusly the bloom day of year as seen below.
 
-```{r}
+```{r,echo=FALSE}
 # Create time series
 ts_temp <- ts(GDD_final$tavg[1:nrow(GDD_final)],frequency = 365,
              start=c(1980,1),end=c(2021,365))
@@ -486,7 +486,7 @@ forecasts_jp <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   select(year,doy)
 
 colnames(forecasts_jp)<-c('Year', 'Day of Year')
-kable(forecasts_jp)
+kable(t(forecasts_jp))
 ```
 
 # Summary of Predictions
@@ -505,8 +505,3 @@ kable(results)
 
 If historical phenological stages were recorded for all locations in this competition, we would have been able to fit a growth model for each species and location. This would have allowed us to create more accurate models specific to that cherry tree species and environmental factors. Additionally, weather data was extremely limited or unreliable for locations outside the United States. If historical weather data was freely and readily available to the public, we would have been able to create a better time series model for GDD. 
 
-
-
-
-
-Details can be found in [Phenological Models of Flower Bud Stages and Fruit Growth of 'Montmorency' Sour Cherry Based on Growing Degree-day Accumulation by C. Zavalloni, J. Adresen, and J. Flore](https://journals.ashs.org/downloadpdf/journals/jashs/131/5/article-p601.pdf).
