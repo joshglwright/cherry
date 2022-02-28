@@ -276,7 +276,7 @@ forecasts_ca
 ```
 
 # Liestal
-The cherry tree in Liestal is a different species from the ones in DC and Vancouver. Ideally, we would want to fit a new growth model using historical phenological stages. Unfortunately, such a dataset is not readily available. So we use the same growth model from DC to calculate the mean growth stage for historical peak bloom dates. We use the average growth stage as the cutoff for our prediction.
+The cherry tree in Liestal is a different species from the ones in DC and Vancouver. Ideally, we would want to fit a new growth model using historical phenological stages. Unfortunately, such a dataset is not readily available. So we use the same growth model from DC to calculate the mean growth stage for historical peak bloom dates. We use the average growth stage for the past 5 years as the cutoff for our prediction.
 
 ```{r, cache=TRUE, echo=FALSE}
 # Obtain historical temps for both Liestal and Kyoto
@@ -319,13 +319,14 @@ GDD_final <- li_temp %>%
 # Check historical GDD and corresponding predicted growth stages for actual bloom dates in Liestal
 testdata <- cherry %>% 
   left_join(GDD_final %>% select(date,GDD), by=c('bloom_date'='date')) %>%
-  filter(year >= 1980 & location=='liestal') %>%
+  filter(year >= 2016 & location=='liestal') %>%
   select(GDD)
 
-mean(predict(growth_model,newdata=testdata),na.rm=TRUE)
+summary(predict(growth_model,newdata=testdata))
+li_thresh <- mean(predict(growth_model,newdata=testdata),na.rm=TRUE)
 ```
 
-We can approximate the peak bloom for the cherry trees in Liestal (as defined by MeteoSwiss) using the growth model for the trees in DC if we use 7.39 as a threshold for the predicted growth stage. In order words, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage is greater than or equal to 7.39.
+We can approximate the peak bloom for the cherry trees in Liestal (as defined by MeteoSwiss) using the growth model for the trees in DC if we use `r li_thresh` as a threshold for the predicted growth stage. In order words, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage is greater than or equal to `r li_thresh`.
 
 ```{r, cache=TRUE, echo=FALSE}
 # Create time series
@@ -366,7 +367,7 @@ future_growthstage <- predict(growth_model,newdata=newdata)
 forecasts_li <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   group_by(year) %>%
   filter(doy >= 50 & doy <= 200) %>%
-  filter(pred.gs >= 7.39) %>%
+  filter(pred.gs >= 6.8) %>%
   filter(row_number()==1) %>%
   select(year,doy)
 
@@ -411,13 +412,14 @@ GDD_final <- jp_temp2 %>%
 # Check historical GDD and corresponding predicted growth stages for actual bloom dates in Liestal
 testdata <- cherry %>% 
   left_join(GDD_final %>% select(date,GDD), by=c('bloom_date'='date')) %>%
-  filter(year >= 1980 & location=='kyoto') %>%
+  filter(year >= 2016 & location=='kyoto') %>%
   select(GDD)
 
-mean(predict(growth_model,newdata=testdata),na.rm=TRUE)
+summary(predict(growth_model,newdata=testdata))
+jp_thresh <- mean(predict(growth_model,newdata=testdata),na.rm=TRUE)
 ```
 
-Based on the above result, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage is greater than or equal to 8.26.
+Based on the above result, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage is greater than or equal to `r jp_thresh`.
 
 ```{r}
 # Create time series
@@ -429,38 +431,6 @@ ts_temp %>%
   autoplot()
 ```
 
-<!-- There's something weird going on with the last few months of data for Kyoto. As shown in the plot above. When comparing the time period between August and January for 2020 versus 2021, we see that the plot for 2021 proceeds horizontally and abruptly drops compared to the 2020 plot, which shows are more gradual downward trend.  -->
-
-<!-- ```{r echo=FALSE,message=FALSE} -->
-<!-- jp_temp2 %>% filter(date >= "2021-08-01" & date <= "2021-12-31") %>%  -->
-<!--   ungroup() %>% select(date,tavg) %>% ggplot(aes(x=date)) + geom_line(aes(y=tavg)) + -->
-<!--   theme_minimal() + -->
-<!--   ggtitle("Temperature Plot for August through December (2021)") + -->
-<!--   xlab("Date") + -->
-<!--   ylab("Degree Celsius") + -->
-<!--   theme(plot.title=element_text(hjust=0.5)) -->
-
-<!-- jp_temp2 %>% filter(date >= "2020-08-01" & date <= "2020-12-31") %>%  -->
-<!--   ungroup() %>% select(date,tavg) %>% ggplot(aes(x=date)) + geom_line(aes(y=tavg)) + -->
-<!--   theme_minimal() + -->
-<!--   ggtitle("Temperature Plot for August through December (2020)") + -->
-<!--   xlab("Date") + -->
-<!--   ylab("Degree Celsius") + -->
-<!--   theme(plot.title=element_text(hjust=0.5)) -->
-
-<!-- ``` -->
-<!-- While not impossible, the historical weather available through [Weather Underground](https://www.wunderground.com/history/monthly/jp/itami-shi/RJOO) shows that the temperature drop was not so drastic. As this sudden drop will significantly affect predictions, we deemed the 2021 data for Kyoto unreliable and removed the records. -->
-
-<!-- ```{r} -->
-<!-- # Create time series -->
-<!-- ts_temp2 <- ts(GDD_final$tavg[50:(nrow(GDD_final)-365)],frequency = 365, -->
-<!--              #Only start counting from day 50 -->
-<!--              start=c(1980,50),end=c(2020,365)) -->
-
-<!-- ts_temp2 %>% -->
-<!--   mstl(s.window="periodic") %>% -->
-<!--   autoplot() -->
-<!-- ``` -->
 
 ```{r, cache=TRUE, echo=FALSE}
 if (file.exists('pred_jp.rds')){
@@ -492,7 +462,7 @@ future_growthstage <- predict(growth_model,newdata=newdata)
 forecasts_jp <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   group_by(year) %>%
   filter(doy >= 50 & doy <= 200) %>%
-  filter(pred.gs >= 8.26) %>%
+  filter(pred.gs >= 8.3) %>%
   filter(row_number()==1) %>%
   select(year,doy)
 
