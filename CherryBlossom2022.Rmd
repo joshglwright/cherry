@@ -339,9 +339,9 @@ ts_temp %>%
 if (file.exists('pred_li.rds')){
   pred_li <- readRDS(here("pred_li.rds"))
 } else{
-  # Fit time series to GDD
+  # Fit time series to temperature
   # Fix seasonal component to (0,1,0)
-  ts_fit <- auto.arima(ts_gdd, ic = 'aicc')
+  ts_fit <- auto.arima(ts_temp, ic = 'aicc')
   ar <- ts_fit$arma[1:2]
   ma <- ts_fit$arma[3:4]
   dd <- ts_fit$arma[5:7]
@@ -352,7 +352,7 @@ if (file.exists('pred_li.rds')){
   saveRDS(pred_li,here("pred_li.rds"))
 }
 
-# Forecasted GDD and growth stage
+# Calculate GDD and growth stage
 newdata <- tibble(date=seq.Date(as.Date("2022-01-01"),length.out=length(pred_li$pred),by="day"),
                   doy=yday(date),year=year(date),tavg=pred_li$pred) %>%
   mutate(NewYear=year(date %m-% period("49 day"))) %>%
@@ -463,23 +463,22 @@ ts_temp %>%
 <!-- ``` -->
 
 ```{r, cache=TRUE, echo=FALSE}
-
 if (file.exists('pred_jp.rds')){
   pred_jp <- readRDS(here("pred_jp.rds"))
 } else{
-  # Fit time series to GDD
-  ts_fit <- auto.arima(ts_gdd, ic = 'aicc')
+  # Fit time series to temperature
+  ts_fit <- auto.arima(ts_temp, ic = 'aicc')
   ar <- ts_fit$arma[1:2]
   ma <- ts_fit$arma[3:4]
   dd <- ts_fit$arma[5:7]
   
-  # Use result from fitted time series to predict GDD until May 2031
+  # Use result from fitted time series to predict temperature until May 2031
   preddays <- difftime("2031-05-31","2022-01-01",units="days")
   pred_jp <- sarima.for(ts_temp,as.numeric(preddays),ar[1],dd[2],ar[2],ma[1],dd[3],ma[2],dd[1])
   saveRDS(pred_jp,here("pred_jp.rds"))
 }
 
-# Forecasted GDD and growth stage
+# Calculate GDD and growth stage
 newdata <- tibble(date=seq.Date(as.Date("2022-01-01"),length.out=length(pred_jp$pred),by="day"),
                   doy=yday(date),year=year(date),tavg=pred_jp$pred) %>%
   mutate(NewYear=year(date %m-% period("49 day"))) %>%
@@ -493,7 +492,7 @@ future_growthstage <- predict(growth_model,newdata=newdata)
 forecasts_jp <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   group_by(year) %>%
   filter(doy >= 50 & doy <= 200) %>%
-  filter(pred.gs >= 8) %>%
+  filter(pred.gs >= 8.26) %>%
   filter(row_number()==1) %>%
   select(year,doy)
 
@@ -502,8 +501,12 @@ forecasts_jp
 
 # Final predictions
 The summary table below shows the final predictions for the four locations from 2022 to 2031.
-```{r}
+```{r, echo=FALSE}
+results <- tibble(year=seq(2022,2031),kyoto=forecasts_jp$doy,liestal=forecasts_li$doy,
+                  washingtondc=forecasts_dc$doy,vancouver=forecasts_ca$doy)
+write.csv(results,file=here("cherry-predictions-jwright-tsong.csv"))
 
+results
 ```
 
 # Closing thoughts
