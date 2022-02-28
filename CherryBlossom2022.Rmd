@@ -1,6 +1,6 @@
 ---
 title: "Predicting Cherry Blossom Bloom Dates"
-author: "Joshua Write and Taehoon Song"
+author: "Joshua Wright and Taehoon Song"
 date: "2/26/2022"
 output: pdf_document
 urlcolor: blue
@@ -12,9 +12,12 @@ knitr::opts_chunk$set(echo = TRUE,message=FALSE,fig.align = "center")
 ```
 
 # Introduction
-In this document, we demonstrate how we went about predicting the peak bloom dates in the coming decade for all four locations required by the competition. We use different modeling approaches due to different available data. 
 
-```{r}
+Cherry tree blossoms are celebrated across multiple cultures. Festivals and sight-seeing tourism often revolve around this natural event. Planning events around this event is difficult seeing as the date is not the same from year to year. As such, it is of interest to try and predict the date of the blossoming. In this research, we demonstrate our proposed model for predicting the peak bloom dates in the coming decade for Kyoto, Liestal, Washington D.C., and Vancouver. 
+
+For this report, we will go through each location individually as a different model is used for each. In each location's portion, we describe the logistic growth model's specification, the data used for fitting the model, and the predicted day of year for full blossoming in the years 2022 through 2031.
+
+```{r,echo=FALSE}
 # Loading in packages and data
 library(tidyverse)
 library(forecast)
@@ -22,6 +25,7 @@ library(lubridate)
 library(astsa)
 library(here)
 library(rnoaa)
+library(knitr)
 
 cherry <- read_csv(here('peak-bloom-prediction','data','washingtondc.csv')) %>%
   bind_rows(read_csv(here('peak-bloom-prediction','data','liestal.csv'))) %>%
@@ -30,15 +34,19 @@ cherry <- read_csv(here('peak-bloom-prediction','data','washingtondc.csv')) %>%
 ```
 
 # Washington DC
-In the field of phenology, plant growth is often modeled by using growing degree-day (GDD) as a predictor. Since the [National Park Service(NPS)](https://www.nps.gov/subjects/cherryblossom/bloom-watch.htm) publishes dates of various growth stages for 2004 through 2021, we use this to build a growth model that helps us estimate the threshold GDD for which we can expect the plant to bloom. Details can be found in [Phenological Models of Flower Bud Stages and Fruit Growth of 'Montmorency' Sour Cherry Based on Growing Degree-day Accumulation by C. Zavalloni, J. Adresen, and J. Flore](https://journals.ashs.org/downloadpdf/journals/jashs/131/5/article-p601.pdf). The authors use 4 degrees Celsius as the base for calculating GDD and fit a logistic function to the phenological stages from side green as a function of acculumated GDD.
+
+In the field of phenology, plant growth is often modeled by using growing degree-day (GDD) as a predictor. Since the [National Park Service(NPS)](https://www.nps.gov/subjects/cherryblossom/bloom-watch.htm) publishes dates of various growth stages for 2004 through 2021, we use this to build a logistic growth model (also known as the Verhulst model) that helps us estimate the threshold GDD for which we can expect the stage for the flowers to bloom.  The authors use 4 degrees Celsius as the base for calculating GDD and fit a logistic function to the phenological stages from side green as a function of accumulated GDD.
+
 \[
 y = \frac{k}{1+\left[\frac{k-n_0}{n_0}\cdot\exp(-r\cdot \text{GDD})\right]}
 \]
-where \textit{y} is the phenological stage and \textit{k} and \textit{r} are empirical factors related to growth rate. Now, with just enough knowledge to be dangerous, we attempt to use this model to fit the growth stages published by the NPS as a function of cumulative GDD. Note that the authors use $n_0=2$ because they were interested in phenological stages after side green (Stage 2). To be consistent with the paper's authors, we label the phenological stages published by the NPS in a similar fashion.
+
+where \textit{y} is the phenological stage and \textit{k} and \textit{r} are empirical factors related to growth rate and limited growth factors. \textit{y} is an integer value which ranges from 3 (green budding stage) and 8 (peak blossoming stage). Now we  use this model to fit the growth stages published by the NPS as a function of cumulative GDD. In our data from the NPS, we only have data starting at green budding (stage 3), as such our $n_0$ will be 3.
 
 ## Obtaining temperature and phenological data for DC
-Since the species in the paper is different from what we're interested in, we must first identify the typical day of year when the cherry blossom trees in DC reach the green buds stage (Stage 3, as defined by the authors). 
-```{r}
+In order to determine at what day of year we start calculating GDD, we need to determine when our $n_0$ stage is estimated to begin. To do this, we will look at the range of dates that green budding is reported and take the minimum, which is found to be at 50 days into the year. Thus, we only use the average temperatures after the 49th day of the year to ensure that we start calculating GDD around when Stage 3 occurs.
+
+```{r, echo=FALSE}
 # Import historical weather data from DayMet
 dc_tmin <- read_csv(here('peak-bloom-prediction','data','statistics_tmin.csv'))
 dc_tmax <- read_csv(here('peak-bloom-prediction','data','statistics_tmax.csv'))
@@ -82,8 +90,6 @@ phenostage <- read_csv(here('peak-bloom-prediction','data',
 summary(phenostage$GreenBuds)
 ```
 
-This result suggests that Stage 3 occurs as early as 50 days from the start of the year. Thus, we shift the dates by 49 days to start calculating GDD to ensure that we start calculating GDD as soon as Stage 3 occurs. We also set $n_0=3$ because we started from Stage 3 instead of 2.
-
 ## Building the growth model
 As mentioned above, we calculate the GDD using a base of 4 degrees Celsius and starting from 49 days from the beginning of the year. Then, we fit the known phenological stages for the cherry blossoms in DC to the calculated GDDs. 
 
@@ -112,12 +118,13 @@ growth_model <- nls(stagenum ~ k/(1+(k-n0)/n0*exp(-r*GDD)),
 summary(growth_model)
 ```
 
-The model results show that both \textit{k} and \textit{r} are significant. However, inference is not of interest to us. We only care about prediction performance.
+The model results show that both \textit{k} and \textit{r} are significant being estimated to be 10.22 and 0.012 respectively. What we are interested in is at what day of year do we expect the cherry tree to reach stage 8 (peak blossoming). with this model, we calculate the expected stage from a given GDD. Once we reach the first day that is estimated to be stage 8, that is our prediction for bloom date of the year. We can test the accuracy of this model with a few diagnostics.
 
 ## Checking performance on historical data
-Now that we have the growth model, we can test its prediction performance out on historical data that we did not use. 
 
-```{r}
+Now that we have the growth model, we can test its prediction performance out on historical data that we did not use. Using temperature data from 1980 to 2003, we will compare the logistic growth model to the lag model to see which is a better fit. We define the lag model to be where the predicted bloom date is just the previous year's date.   
+
+```{r, echo=FALSE}
 testdata <- GDD_final %>% filter(year<=2003) %>% #Used data from 2004 onward
   group_by(year) %>%
   filter(doy>=50 & doy <= 200) %>%
@@ -140,9 +147,11 @@ comp <- preds %>% group_by(year) %>%
   # compare to using simply using a lag predictor
   mutate(lag_bloom = lag(act.doy),err_lag=abs(act.doy - lag_bloom))
 
-data.frame(MAE_gdd=mean(comp$err_GDD[which(!is.na(comp$err_lag))]),
+mae_tab<-data.frame(MAE_gdd=mean(comp$err_GDD[which(!is.na(comp$err_lag))]),
        MAE_lag=mean(comp$err_lag,na.rm=TRUE))
 
+colnames(mae_tab)<-c('Logistic Growth Model MAE','Lag Model MAE')
+kable(mae_tab)
 ```
 
 Our growth model has a much lower mean absolute error (MAE) compared to simply using the previous year's bloom date as a predictor. This is good because this is the bare minimum a useful model should be able to do. This is more apparent when we plot the two models against the actual peak bloom days since January 1st.
@@ -168,7 +177,9 @@ ggplot(plt_data,aes(x=Actual)) + geom_point(aes(y=doy)) +
 ```
 
 ## Predicting future GDD and future peak bloom dates
-For us to predict future peak bloom dates for DC, we must first predict future GDDs. We could predict future temperature and calculate GDD from that; however, that would be unnecessary because we always shift the dates by 49 days and use the base of 4 degrees Celsius to calculate GDD. We can directly predict GDD to avoid that step.
+
+For us to predict future peak bloom dates for Washington D.C., we must first predict future GDDs. We could predict future temperature and calculate GDD from that; however, that would be unnecessary because we always start calculating GDD at 50 days and use the base of 4 degrees Celsius. We can directly predict GDD to avoid that step. For GDD prediction, we will fit a model to the GDD using a time series seasonal ARIMA model.
+
 ```{r, cache=TRUE}
 # Create time series
 ts_gdd <- ts(GDD_final$GDD[50:nrow(GDD_final)],frequency = 365,
@@ -192,7 +203,7 @@ if (file.exists('pred_dc.rds')){
 }
 ```
 
-We can now predict the peak bloom day for DC using the predicted GDD as an input for the growth model. 
+With a time series model fit, we can now predict the peak bloom day for DC using the predicted GDD as an input for the logistic growth model. Feeding our predicted GDD values into our model outputs the following predictions:
 
 ```{r}
 # Forecasted GDD and growth stage
@@ -206,14 +217,16 @@ forecasts_dc <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   filter(row_number()==1) %>%
   select(year,doy)
 
-forecasts_dc
+colnames(forecasts_dc)<-c('Year', 'Day of Year')
+kable(forecasts_dc)
 ```
 
 # Vancouver
-Vancouver doesn't provide historical peak bloom dates. However, we can use the growth model from DC to predict future peak bloom dates because the tree species are identical (or close to identical) and the peak bloom definition is the same. We simply need to calculate historical GDD using the same definitions and predict future GDD for Vancouver to be able to predict the peak bloom dates.
+
+Vancouver doesn't provide historical peak bloom dates. However, we use the growth model from DC to predict future peak bloom dates because the tree species are identical (or close to identical) and the peak bloom definition is the same. We will use temperature data to once again calculate the historical GDD values and fit another time series model to predict future bloom dates.
 
 ## Obtaining historical weather data
-Similar to DC, we obtained the historical weather data for Vancouver via DayMet. However, this dataset only goes to December 2019, so we use `rnoaa` to obtain the remaining data up to Jan 2022.
+Similar to DC, we obtained the historical weather data for Vancouver via DayMet. However, this dataset only goes from January 1980  to December 2019, so we use the `rnoaa` *R* package provided by NOAA to obtain the remaining data up to Jan 2022. We undergo the same process as we did for Washington D.C. in order to fit the time series model and use the exact same logistic growth model for bloom day predictions.
 
 ```{r, cache=TRUE, echo=FALSE}
 # Import historical weather data from DayMet
@@ -272,11 +285,15 @@ forecasts_ca <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   filter(row_number()==1) %>%
   select(year,doy)
 
-forecasts_ca
+colnames(forecasts_ca)<-c('Year', 'Day of Year')
+kable(forecasts_ca)
 ```
 
+What we have are later predictions later than what we saw in Washington D.C., but that is to be expected given the lower average temperatures in Vancouver.
+
 # Liestal
-The cherry tree in Liestal is a different species from the ones in DC and Vancouver. Ideally, we would want to fit a new growth model using historical phenological stages. Unfortunately, such a dataset is not readily available. So we use the same growth model from DC to calculate the mean growth stage for historical peak bloom dates. We use the average growth stage for the past 5 years as the cutoff for our prediction.
+
+The cherry tree species in Liestal is a different species from the ones in Washington D.C. and Vancouver. Additionally, the percentage of blooming for the tree to be declared as at the stage of peak bloom is less as well. Ideally, we would want to fit a new growth model using historical phenological stages. Unfortunately, such a dataset is not readily available. Thusly, we use the same growth model parameters \textit{k} and \textit{r} from original to calculate the mean growth stage for historical peak bloom dates. This is to say that we will use the cumulative GDD from each of the historical bloom dates to see what *y* value our model would predict at that GDD. We will once again start calculating GDD at the 50th day of the year. We use the average growth stage for the past 5 years as the cutoff for our prediction.
 
 ```{r, cache=TRUE, echo=FALSE}
 # Obtain historical temps for both Liestal and Kyoto
@@ -326,7 +343,7 @@ summary(predict(growth_model,newdata=testdata))
 li_thresh <- mean(predict(growth_model,newdata=testdata),na.rm=TRUE)
 ```
 
-We can approximate the peak bloom for the cherry trees in Liestal (as defined by MeteoSwiss) using the growth model for the trees in DC if we use `r li_thresh` as a threshold for the predicted growth stage. In order words, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage is greater than or equal to `r li_thresh`.
+We can approximate the peak bloom for the cherry trees in Liestal (as defined by MeteoSwiss) using the growth model for the trees in Washington D.C. if we use 6.8 as the predicted growth stage for full blossoming. Another change we use here is directly predicting the temperature to then find the GDD as opposed to just fitting a time series model to the GDD. This is done due to the new circumstances making GDD time series model fits less reliable than just predicting temperature. After predicting the temperature, we then calculate the GDD and find which day of year is the first to reach stage 6.8. Our predictions are listed below.
 
 ```{r, cache=TRUE, echo=FALSE}
 # Create time series
@@ -371,22 +388,24 @@ forecasts_li <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   filter(row_number()==1) %>%
   select(year,doy)
 
-forecasts_li
+colnames(forecasts_li)<-c('Year', 'Day of Year')
+kable(forecasts_li)
 ```  
 
 # Kyoto
-Similar to predicting peak bloom dates for Liestal, the peak bloom dates for Kyoto (as defined by a local newspaper in Arashiyama) need to be approximated using the growth model for the DC cherry trees. 
 
-```{r}
+Similar to predicting peak bloom dates for Liestal, the peak bloom dates for Kyoto (as defined by a local newspaper in Arashiyama) need to be approximated using the growth model for the Washington D.C. cherry trees. Alongside the issues of having a different species of cherry tree without phenological stage data and a differing definition of peak bloom, we also have the issue of incorrect historical temperature data provided by NOAA.
+
+```{r, echo=FALSE}
 jp_temp <- temps %>% filter(city == 'Kyoto') %>%
   mutate(doy = yday(date)) %>%
   filter(doy != 366) #Leap year mess
 
 # Historical temperature plot for Kyoto
-plot(jp_temp$date,jp_temp$tavg,type="l")
+plot(jp_temp$date,jp_temp$tavg,type="l", ylab = "Average Temperature (Celsius)", xlab = "Date", main = "Time Series of Daily Average Temperature in Kyoto")
 ```
 
-Notice that the data abruptly cuts off at 0 throughout the years. This is likely due to missing values. We remove 0s to NAs so that the algorithm knows that the value is actually missing. Kyoto is a very warm city and rarely dips below 0 degrees Celsius, so we shouldn't lose too much information with this substitution. We're missing a month of data for September 2009, but that shouldn't be too much of a problem for predicting 2022 and onward.
+Notice that the data abruptly cuts off at 0 commonly starting at the year 1990. This is likely due to missing values due to these freezing temperatures being abruptly different than previous temperatures and sometimes even in the middle of summer. We change 0's to NA's so that the algorithm knows that the value is actually missing. Kyoto is a very warm city and rarely dips below 0 degrees Celsius, so we should not lose too much information with this substitution. We're missing a month of data for September 2009, but that shouldn't be too much of a problem for predicting 2022 and onward given the amount of data we have. Modifying the data as we mentioned, we have this new time series as seen below.
 
 ```{r}
 # Substitute 0s for NA
@@ -395,10 +414,10 @@ jp_temp2 <- jp_temp %>%
   group_by(year,month) %>%
   mutate(tavg=ifelse(tavg==0,NA,tavg))
 
-plot(jp_temp2$date,jp_temp2$tavg,type="l")
+plot(jp_temp2$date,jp_temp2$tavg,type="l", ylab = "Average Temperature (Celsius)", xlab = "Date", main = "Modified Time Series of Daily Average Temperature in Kyoto")
 ```
 
-With the substitution, the odd behavior is gone. We can proceed to calculate GDD for Kyoto.
+With the substitution, the odd behavior is gone mostly accounted for, so we can proceed to calculate the historical GDD for Kyoto. Just like with Liestal, we will examine what stage the previous bloom dates in 2016 to 2021 were according to our model.
 
 ```{r}
 # GDD calculations
@@ -419,7 +438,7 @@ summary(predict(growth_model,newdata=testdata))
 jp_thresh <- mean(predict(growth_model,newdata=testdata),na.rm=TRUE)
 ```
 
-Based on the above result, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage is greater than or equal to `r jp_thresh`.
+What we find is that we want our model to predict when the stage is 8.3. This makes sense with the peak bloom definition being greater than that of Washington D.C.. With this stage number, we fit a time series model to the daily average temperature of Kyoto to predict future GDD and thusly the bloom day of year as seen below.
 
 ```{r}
 # Create time series
@@ -466,19 +485,28 @@ forecasts_jp <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   filter(row_number()==1) %>%
   select(year,doy)
 
-forecasts_jp
+colnames(forecasts_jp)<-c('Year', 'Day of Year')
+kable(forecasts_jp)
 ```
 
-# Final predictions
-The summary table below shows the final predictions for the four locations from 2022 to 2031.
-```{r, echo=FALSE}
-results <- tibble(year=seq(2022,2031),kyoto=forecasts_jp$doy,liestal=forecasts_li$doy,
-                  washingtondc=forecasts_dc$doy,vancouver=forecasts_ca$doy)
-write.csv(results,file=here("cherry-predictions-jwright-tsong.csv"))
+# Summary of Predictions
 
-results
+We have described the methodology used for bloom day predictions for each of the locations. The summary table below shows the final predictions for the four locations from 2022 to 2031.
+
+```{r, echo=FALSE}
+results <- tibble(year=seq(2022,2031),kyoto=forecasts_jp$`Day of Year`,liestal=forecasts_li$`Day of Year`,
+                  washingtondc=forecasts_dc$`Day of Year`,vancouver=forecasts_ca$`Day of Year`)
+write.csv(results,file=here("cherry-predictions-jwright-tsong.csv"))
+colnames(results)<-c('Year','Kyoto','Liestal','Washington D.C.', 'Vancouver')
+kable(results)
 ```
 
 # Closing thoughts
-If historical phenological stages were recorded for all locations in this competition, we would have been able to fit a growth model for each species and location. This would have allowed us to create more accurate models. Additionally, weather data was extremely limited or unreliable for locations outside the United States. If historical weather data was free and readily available to the public, we would have been able to create a better time series model for GDD. Lastly, using weather forecasts from meteorologists will likely improve the accuracy of the peak bloom predictions.
 
+If historical phenological stages were recorded for all locations in this competition, we would have been able to fit a growth model for each species and location. This would have allowed us to create more accurate models specific to that cherry tree species and environmental factors. Additionally, weather data was extremely limited or unreliable for locations outside the United States. If historical weather data was freely and readily available to the public, we would have been able to create a better time series model for GDD. 
+
+
+
+
+
+Details can be found in [Phenological Models of Flower Bud Stages and Fruit Growth of 'Montmorency' Sour Cherry Based on Growing Degree-day Accumulation by C. Zavalloni, J. Adresen, and J. Flore](https://journals.ashs.org/downloadpdf/journals/jashs/131/5/article-p601.pdf).
