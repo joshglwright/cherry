@@ -30,7 +30,7 @@ cherry <- read_csv(here('peak-bloom-prediction','data','washingtondc.csv')) %>%
   select(location,year,bloom_date,bloom_doy)
 ```
 
-# Predicting peak bloom dates for DC
+# Washington DC
 In the field of phenology, plant growth is often modeled by using growing degree-day (GDD) as a predictor. Since the [National Park Service(NPS)](https://www.nps.gov/subjects/cherryblossom/bloom-watch.htm) publishes dates of various growth stages for 2004 through 2021, we use this to build a growth model that helps us estimate the threshold GDD for which we can expect the plant to bloom. Details can be found in [Phenological Models of Flower Bud Stages and Fruit Growth of 'Montmorency' Sour Cherry Based on Growing Degree-day Accumulation by C. Zavalloni, J. Adresen, and J. Flore](https://journals.ashs.org/downloadpdf/journals/jashs/131/5/article-p601.pdf). The authors use 4 degrees Celsius as the base for calculating GDD and fit a logistic function to the phenological stages from side green as a function of acculumated GDD.
 \[
 y = \frac{k}{1+\left[\frac{k-n_0}{n_0}\cdot\exp(-r\cdot \text{GDD})\right]}
@@ -210,7 +210,7 @@ forecasts_dc <- newdata %>% mutate(pred.gs=future_growthstage) %>%
 forecasts_dc
 ```
 
-# Predicting peak bloom dates for Vancouver
+# Vancouver
 Vancouver doesn't provide historical peak bloom dates. However, we can use the growth model from DC to predict future peak bloom dates because the tree species are identical (or close to identical) and the peak bloom definition is the same. We simply need to calculate historical GDD using the same definitions and predict future GDD for Vancouver to be able to predict the peak bloom dates.
 
 ## Obtaining historical weather data
@@ -276,17 +276,20 @@ forecasts_ca <- newdata %>% mutate(pred.gs=future_growthstage) %>%
 forecasts_ca
 ```
 
-# Predicting peak bloom dates for Liestal
+# Liestal
 The cherry tree in Liestal is a different species from the ones in DC and Vancouver. Ideally, we would want to fit a new growth model using historical phenological stages. Unfortunately, such a dataset is not readily available. So we use the same growth model from DC to calculate the mean growth stage for historical peak bloom dates. We use the average growth stage as the cutoff for our prediction.
 
-```{r, cache=TRUE echo=FALSE}
+```{r, cache=TRUE, echo=FALSE}
 # Obtain historical temps for both Liestal and Kyoto
 # Temperature data for remaining locations
 locs <- c("GME00127786","JA000047759")
 city <- c("Liestal","Kyoto")
 
 # Obtain historical data
-temp_list <- lapply(locs,getTemperature,date_min = "2017-01-01", date_max = "2022-01-31")
+temp_list <- lapply(locs,getTemperature,date_min = "1980-01-01", date_max = "2022-01-31")
+
+# Data for Liestal (missing 2015 and half of 2016. Take them out)
+# Data for Kyoto (missing Sep 2001. Take out 2001.)
 
 # ghcnd_search returns a list. Extract and append each element to create one dataset.
 temps <- tibble()
@@ -298,8 +301,10 @@ for(i in 1:length(temp_list)){
 loclabels <- as_tibble(cbind(locs,city))
 temps <- temps %>% left_join(loclabels,by=c("id"="locs")) %>% select(-id)
 
-li_temp <- temps %>% filter(city == 'Liestal') %>%
-  mutate(doy = yday(date)) %>%
+alldates <- tibble(date=seq.Date(from=as.Date('1980-01-01'),to=as.Date('2022-01-31'),by='day'))
+
+li_temp <- alldates %>% left_join(temps %>% filter(city == 'Liestal'), by='date') %>%
+  mutate(year=year(date), doy = yday(date)) %>%
   filter(doy != 366) #Leap year mess
 
 # GDD calculations
@@ -315,26 +320,29 @@ GDD_final <- li_temp %>%
 # Check historical GDD and corresponding predicted growth stages for actual bloom dates in Liestal
 testdata <- cherry %>% 
   left_join(GDD_final %>% select(date,GDD), by=c('bloom_date'='date')) %>%
-  filter(year >= 2017 & location=='liestal') %>%
+  filter(year >= 1980 & location=='liestal') %>%
   select(GDD)
 
-mean(predict(growth_model,newdata=testdata))
+mean(predict(growth_model,newdata=testdata),na.rm=TRUE)
 ```
 
-We can approximate the peak bloom for the cherry trees in Liestal (as defined by MeteoSwiss) using the growth model for the trees in DC if we use 6.8 as a threshold for the predicted growth stage. In order words, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage rounds to 6.8.
+We can approximate the peak bloom for the cherry trees in Liestal (as defined by MeteoSwiss) using the growth model for the trees in DC if we use 7.4 as a threshold for the predicted growth stage. In order words, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage rounds to 7.4.
 
-```{r, cache=TRUE echo=FALSE}
+```{r, cache=TRUE, echo=FALSE}
 # Create time series
-ts_gdd <- ts(GDD_final$GDD[50:nrow(GDD_final)],frequency = 365,
+ts_gdd <- ts(GDD_final$tavg[50:nrow(GDD_final)],frequency = 365,
              #Only start counting GDD from day 50 & 2022 li data only goes to January
-             start=c(2017,50),end=c(2022,31)) 
-plot(decompose(ts_gdd))
+             start=c(1980,50),end=c(2022,31)) 
+ts_gdd %>%
+  mstl(s.window="periodic") %>%
+  autoplot()
 
 if (file.exists('pred_li.rds')){
   pred_li <- readRDS(here("pred_li.rds"))
 } else{
   # Fit time series to GDD
-  ts_fit <- auto.arima(ts_gdd, ic = 'aicc')
+  # Fix seasonal component to (0,1,0)
+  ts_fit <- auto.arima(ts_gdd, ic = 'aicc',D=1,start.P=0,start.Q=0,max.Q=0,max.P=0)
   ar <- ts_fit$arma[1:2]
   ma <- ts_fit$arma[3:4]
   dd <- ts_fit$arma[5:7]
@@ -347,20 +355,26 @@ if (file.exists('pred_li.rds')){
 
 # Forecasted GDD and growth stage
 newdata <- tibble(date=seq.Date(as.Date("2022-02-01"),length.out=length(pred_li$pred),by="day"),
-                    GDD=pred_li$pred,doy=yday(date),year=year(date))
+                  doy=yday(date),year=year(date)) %>%
+  mutate(NewYear=year(date %m-% period("49 day"))) %>%
+  mutate(DD = ifelse(tavg - thresh > 0, tavg - thresh, 0)) %>%
+  group_by(NewYear) %>%
+  mutate(GDD = cumsum(DD)) %>%
+  ungroup()
+
 future_growthstage <- predict(growth_model,newdata=newdata)
 
 forecasts_li <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   group_by(year) %>%
   filter(doy >= 50 & doy <= 200) %>%
-  filter(round(pred.gs,digits=1) >= 6.8) %>%
+  filter(round(pred.gs,digits=1) >= 7.4) %>%
   filter(row_number()==1) %>%
   select(year,doy)
 
 forecasts_li
 ```  
 
-# Predicting peak bloom dates for Kyoto
+# Kyoto
 Similar to predicting peak bloom dates for Liestal, the peak bloom dates for Kyoto (as defined by a local newspaper in Arashiyama) need to be approximated using the growth model for the DC cherry trees. 
 
 ```{r}
@@ -379,45 +393,54 @@ GDD_final <- jp_temp %>%
 # Check historical GDD and corresponding predicted growth stages for actual bloom dates in Liestal
 testdata <- cherry %>% 
   left_join(GDD_final %>% select(date,GDD), by=c('bloom_date'='date')) %>%
-  filter(year >= 2017 & location=='kyoto') %>%
+  filter(year >= 1980 & location=='kyoto') %>%
   select(GDD)
 
-mean(predict(growth_model,newdata=testdata))
+mean(predict(growth_model,newdata=testdata),na.rm=TRUE)
 ```
 
-Based on the above result, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage rounds to 8.2.
+Based on the above result, we estimate the peak bloom date by finding the earliest date for which the predicted growth stage rounds to 8.
 
-```{r, cache=TRUE echo=FALSE}
+```{r, cache=TRUE, echo=FALSE}
 # Create time series
-ts_gdd <- ts(GDD_final$GDD[50:nrow(GDD_final)],frequency = 365,
+ts_gdd <- ts(GDD_final$tavg[50:nrow(GDD_final)],frequency = 365,
              #Only start counting GDD from day 50 & 2022 li data only goes to January
              start=c(2017,50),end=c(2022,31)) 
-plot(decompose(ts_gdd))
+
+ts_gdd %>%
+  mstl(s.window="periodic") %>%
+  autoplot()
 
 if (file.exists('pred_jp.rds')){
-  pred_li <- readRDS(here("pred_jp.rds"))
+  pred_jp <- readRDS(here("pred_jp.rds"))
 } else{
   # Fit time series to GDD
-  ts_fit <- auto.arima(ts_gdd, ic = 'aicc')
+  ts_fit <- auto.arima(ts_gdd, ic = 'aicc',D=1,start.P=0,start.Q=0,max.Q=0,max.P=0)
   ar <- ts_fit$arma[1:2]
   ma <- ts_fit$arma[3:4]
   dd <- ts_fit$arma[5:7]
   
   # Use result from fitted time series to predict GDD until May 2031
   preddays <- difftime("2031-05-31","2022-02-01",units="days")
-  pred_li <- sarima.for(ts_gdd,as.numeric(preddays),ar[1],dd[2],ar[2],ma[1],dd[3],ma[2],dd[1])
-  saveRDS(pred_li,here("pred_li.rds"))
+  pred_jp <- sarima.for(ts_gdd,as.numeric(preddays),ar[1],dd[2],ar[2],ma[1],dd[3],ma[2],dd[1])
+  saveRDS(pred_jp,here("pred_jp.rds"))
 }
 
 # Forecasted GDD and growth stage
 newdata <- tibble(date=seq.Date(as.Date("2022-02-01"),length.out=length(pred_jp$pred),by="day"),
-                    GDD=pred_jp$pred,doy=yday(date),year=year(date))
+                  doy=yday(date),year=year(date)) %>%
+  mutate(NewYear=year(date %m-% period("49 day"))) %>%
+  mutate(DD = ifelse(tavg - thresh > 0, tavg - thresh, 0)) %>%
+  group_by(NewYear) %>%
+  mutate(GDD = cumsum(DD)) %>%
+  ungroup()
+
 future_growthstage <- predict(growth_model,newdata=newdata)
 
 forecasts_jp <- newdata %>% mutate(pred.gs=future_growthstage) %>%
   group_by(year) %>%
   filter(doy >= 50 & doy <= 200) %>%
-  filter(round(pred.gs,digits=1) >= 8.2) %>%
+  filter(round(pred.gs,digits=1) >= 8) %>%
   filter(row_number()==1) %>%
   select(year,doy)
 
