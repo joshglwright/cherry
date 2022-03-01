@@ -44,7 +44,8 @@ y = \frac{k}{1+\left[\frac{k-n_0}{n_0}\cdot\exp(-r\cdot \text{GDD})\right]}
 where \textit{y} is the phenological stage and \textit{k} and \textit{r} are empirical factors related to limited growth factors and growth rate, respectively. This type of model has been shown to work for predicting phenological stages given GDD for sour cherry trees (see [Phenological Models of Flower Bud Stages and Fruit Growth of 'Montmorency' Sour Cherry Based on Growing Degree-day Accumulation by C. Zavalloni, J. Adresen, and J. Flore](https://journals.ashs.org/downloadpdf/journals/jashs/131/5/article-p601.pdf)). \textit{y} in our model is an integer value which ranges from 3 (green budding stage) and 8 (peak blossoming stage). Stages 4 through 7 are those defined in the NPS data, but are only used for fitting this model. We use this model to fit the growth stages published by the NPS as a function of cumulative GDD. In our data from the NPS, we only have data starting at green budding (stage 3), as such our $n_0$ will be 3.
 
 ## Obtaining temperature and phenological data for DC
-In order to determine at what day of year we start calculating GDD, we need to determine when our $n_0$ stage is estimated to begin. To do this, we will look at the range of dates that green budding is reported and take the minimum, which is found to be at 50 days into the year. Thus, we only use the average temperatures after the 49th day of the year to ensure that we start calculating GDD around when Stage 3 occurs (the reason we calculate the GDD at this point is because the logistic growth model assumes the GDD is zero at stage $n_0$).
+
+In order to determine at what day of year we start calculating GDD, we need to determine when our $n_0$ stage is estimated to begin. To do this, we will look at the range of dates that green budding is reported and take the minimum, which is found to be at 50 days into the year. Thus, we only use the average temperatures after the 49th day of the year to ensure that we start calculating GDD around when Stage 3 occurs (the reason we calculate the GDD at this point is because the logistic growth model assumes the GDD is zero at stage $n_0$). For accessing historical temperature data, we use [DayMet](https://daymet.ornl.gov/getdata) for years 1980 through 2020 and the NOAA database for 2021.
 
 ```{r, echo=FALSE, results='hide'}
 # Import historical weather data from DayMet
@@ -156,7 +157,7 @@ kable(mae_tab)
 
 Our growth model has a much lower mean absolute error (MAE) compared to simply using the previous year's bloom date as a predictor. This is good because this is the bare minimum a useful model should be able to do. This is more apparent when we plot the two models against the actual peak bloom days since January 1st.
 
-```{r, echo=FALSE, fig.height=4}
+```{r, echo=FALSE, fig.height=3.8}
 plt_data <- comp %>% rename(Actual=act.doy,GrowthModel=pred.doy,LagModel=lag_bloom) %>%
   pivot_longer(cols=c("GrowthModel","LagModel"),names_to="type",values_to="doy") %>%
   filter(!is.na(err_lag))
@@ -345,7 +346,7 @@ li_thresh <- mean(predict(growth_model,newdata=testdata),na.rm=TRUE)
 
 We can approximate the peak bloom for the cherry trees in Liestal (as defined by MeteoSwiss) using the growth model for the trees in Washington D.C. if we use 6.8 as the predicted growth stage for full blossoming. Another change we use here is directly predicting the temperature to then find the GDD as opposed to just fitting a time series model to the GDD. This is done due to the new circumstances making GDD time series model fits less reliable than just predicting temperature. After predicting the temperature, we then calculate the GDD and find which day of year is the first to reach stage 6.8. Our predictions are listed below.
 
-```{r, cache=TRUE, echo=FALSE}
+```{r, cache=TRUE, echo=FALSE, fig.height=3.7}
 # Create time series
 ts_temp <- ts(GDD_final$tavg[50:nrow(GDD_final)],frequency = 365,
              #Only start counting from day 50
@@ -394,9 +395,9 @@ kable(t(forecasts_li))
 
 # Kyoto
 
-Similar to predicting peak bloom dates for Liestal, the peak bloom dates for Kyoto (as defined by a local newspaper in Arashiyama) need to be approximated using the growth model for the Washington D.C. cherry trees. Alongside the issues of having a different species of cherry tree without phenological stage data and a differing definition of peak bloom, we also have the issue of incorrect historical temperature data provided by NOAA.
+Similar to predicting peak bloom dates for Liestal, we would like to predict the peak bloom dates for Kyoto (as defined by a local newspaper in Arashiyama) using the growth model for the Washington D.C. cherry trees. Alongside the issues of having a different species of cherry tree without phenological stage data and a differing definition of peak bloom, we also have the issue of unreliable historical temperature data provided by NOAA. We look at the time series and see the extent to which it is unsuitable for modeling below.
 
-```{r, echo=FALSE, fig.height=4}
+```{r, echo=FALSE, fig.height=3.7}
 jp_temp <- temps %>% filter(city == 'Kyoto') %>%
   mutate(doy = yday(date)) %>%
   filter(doy != 366) #Leap year mess
@@ -405,7 +406,7 @@ jp_temp <- temps %>% filter(city == 'Kyoto') %>%
 plot(jp_temp$date,jp_temp$tavg,type="l", ylab = "Average Temperature (Celsius)", xlab = "Date", main = "Time Series of Daily Average Temperature in Kyoto")
 ```
 
-Notice that the data abruptly cuts off at 0 commonly starting at the year 1990. This is likely due to missing values due to these freezing temperatures being abruptly different than previous temperatures and sometimes even in the middle of summer. Due to the unreliable nature of weather data for Kyoto, we reluctantly use a simple linear model to predict future peak bloom dates using year as the predictor.
+Notice that the data abruptly cuts off at 0 commonly starting at the year 1990. This is likely representing missing values due to these freezing temperatures being abruptly different than previous temperatures and sometimes even in the middle of summer. Due to the unreliable nature of weather data for Kyoto, we reluctantly use a simple linear model to predict future peak bloom dates using year as the predictor.
 
 
 ```{r, cache=TRUE, echo=FALSE}
